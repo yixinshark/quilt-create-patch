@@ -12,6 +12,26 @@
 - 保留工作区文件修改状态
 - 智能生成有意义的差异
 
+## 安装方法
+
+### 方法一：直接安装VSIX文件（推荐）
+
+1. 下载最新的[VSIX安装包](https://github.com/yixinshark/quilt-create-patch/releases/download/v0.1.0/quilt-patch-extension-0.1.0.vsix)
+2. 在VSCode中，点击左侧的扩展图标（或按`Ctrl+Shift+P`并输入"Extensions: Install from VSIX..."）
+3. 选择"从VSIX安装..."
+4. 浏览并选择下载的.vsix文件
+5. 安装完成后重启VSCode
+
+### 方法二：从源码构建
+
+```bash
+git clone https://github.com/yixinshark/quilt-create-patch.git
+cd quilt-create-patch
+npm install
+npm run compile
+npm run package  # 生成VSIX文件
+```
+
 ## 前置要求
 
 - Linux系统
@@ -81,10 +101,14 @@ npm install
 - 确保git和quilt已正确安装
 - 在使用前最好有一些未提交的修改
 
+## 问题反馈
+
+如果您在使用过程中遇到任何问题，请[提交issue](https://github.com/yixinshark/quilt-create-patch/issues)。
+
 ## 贡献
 
-欢迎提交Issue和Pull Request！
+欢迎提交Issue和Pull Request！请参阅[贡献指南](CONTRIBUTING.md)了解更多信息。
 
 ## 许可证
 
-MIT 
+[MIT](LICENSE) 
