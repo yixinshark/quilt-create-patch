@@ -3,6 +3,11 @@
   "displayName": "Quilt Patch Creator",
   "description": "Create patches using quilt in VSCode",
   "version": "0.1.0",
+  "publisher": "yixinshark",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yixinshark/quilt-create-patch.git"
+  },
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -30,19 +35,27 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.2.5",
     "@types/vscode": "^1.60.0",
     "@types/mocha": "^10.0.0",
-    "typescript": "^5.1.3"
+    "typescript": "^5.1.3",
+    "@vscode/vsce": "^2.21.0"
   },
   "keywords": [
     "vscode",
     "patch",
-    "quilt"
+    "quilt",
+    "debian",
+    "linux"
   ],
-  "author": "",
-  "license": "MIT"
+  "author": "yixinshark",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/yixinshark/quilt-create-patch/issues"
+  },
+  "homepage": "https://github.com/yixinshark/quilt-create-patch#readme"
 }
