@@ -264,7 +264,7 @@ async function writeFileContent(filePath: string, content: string): Promise<void
     }
 }
 
-async function cleanQuiltState(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
+async function cleanQuiltState(workspaceFolder: vscode.WorkspaceFolder, patchesDir: string): Promise<void> {
     try {
         outputChannel.appendLine('\n=== Cleaning quilt state ===');
         
@@ -287,13 +287,12 @@ async function cleanQuiltState(workspaceFolder: vscode.WorkspaceFolder): Promise
         }
 
         // 确保patches目录存在
-        const patchesDir = path.join(workspaceFolder.uri.fsPath, 'patches');
         try {
             await fsPromises.mkdir(patchesDir, { recursive: true });
-            outputChannel.appendLine('Ensured patches directory exists');
+            outputChannel.appendLine(`Ensured patches directory exists: ${patchesDir}`);
         } catch (error) {
             // 如果目录已存在，这是正常的
-            outputChannel.appendLine(`Note: Patches directory already exists`);
+            outputChannel.appendLine(`Note: Patches directory already exists: ${patchesDir}`);
         }
 
         outputChannel.appendLine('Quilt state cleaned');
@@ -307,6 +306,14 @@ async function cleanQuiltState(workspaceFolder: vscode.WorkspaceFolder): Promise
 async function testQuiltProcess(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
     try {
         outputChannel.appendLine('\n=== TESTING QUILT PROCESS ===');
+        
+        // 检查debian目录
+        const { exists: debianExists, patchesDir, seriesFile } = await checkDebianPatches(workspaceFolder);
+        if (debianExists) {
+            outputChannel.appendLine(`Using debian patches directory: ${patchesDir}`);
+        } else {
+            outputChannel.appendLine(`Using standard patches directory: ${patchesDir}`);
+        }
         
         // 创建测试文件和目录
         const testDir = path.join(workspaceFolder.uri.fsPath, 'quilt_test');
@@ -336,6 +343,12 @@ async function testQuiltProcess(workspaceFolder: vscode.WorkspaceFolder): Promis
         const modifiedContent = 'modified content for testing';
         await fsPromises.writeFile(testFile, modifiedContent, 'utf8');
         outputChannel.appendLine(`Modified test file content: ${testFile}`);
+        
+        // 设置QUILT_PATCHES环境变量
+        const quiltrcContent = `QUILT_PATCHES=${path.relative(testDir, patchesDir)}`;
+        const quiltrcPath = path.join(testDir, '.quiltrc');
+        await fsPromises.writeFile(quiltrcPath, quiltrcContent, 'utf8');
+        outputChannel.appendLine(`Created .quiltrc file with content: ${quiltrcContent}`);
         
         // 运行quilt命令
         await execAsync('quilt init', { cwd: testDir });
@@ -368,7 +381,7 @@ async function testQuiltProcess(workspaceFolder: vscode.WorkspaceFolder): Promis
         outputChannel.appendLine('Refreshed patch');
         
         // 检查patch内容
-        const patchFile = path.join(testDir, 'patches', 'test.patch');
+        const patchFile = path.join(patchesDir, 'test.patch');
         const patchContent = await fsPromises.readFile(patchFile, 'utf8');
         outputChannel.appendLine(`\nPatch content:\n${patchContent}`);
         
@@ -600,8 +613,8 @@ async function generatePatchContent(originalContent: string, modifiedContent: st
 }
 
 // 手动创建patch文件
-async function createManualPatch(patchName: string, fileDiffs: {path: string, content: string}[], workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
-    const patchFilePath = path.join(workspaceFolder.uri.fsPath, 'patches', `${patchName}.patch`);
+async function createManualPatch(patchName: string, fileDiffs: {path: string, content: string}[], patchesDir: string, seriesFile: string): Promise<void> {
+    const patchFilePath = path.join(patchesDir, `${patchName}.patch`);
     let patchContent = '';
     
     // 组合所有文件的差异
@@ -614,10 +627,9 @@ async function createManualPatch(patchName: string, fileDiffs: {path: string, co
     outputChannel.appendLine(`Manually created patch file: ${patchFilePath}`);
     
     // 更新series文件
-    const seriesFilePath = path.join(workspaceFolder.uri.fsPath, 'patches', 'series');
     let seriesContent = '';
     try {
-        seriesContent = await fsPromises.readFile(seriesFilePath, 'utf8');
+        seriesContent = await fsPromises.readFile(seriesFile, 'utf8');
     } catch (error) {
         // 如果文件不存在，创建一个空的
     }
@@ -625,9 +637,49 @@ async function createManualPatch(patchName: string, fileDiffs: {path: string, co
     // 检查是否已经包含了这个patch
     if (!seriesContent.includes(`${patchName}.patch`)) {
         seriesContent += `${patchName}.patch\n`;
-        await fsPromises.writeFile(seriesFilePath, seriesContent, 'utf8');
+        await fsPromises.writeFile(seriesFile, seriesContent, 'utf8');
         outputChannel.appendLine(`Updated series file to include ${patchName}.patch`);
     }
+}
+
+// 检查是否存在debian目录以及debian/patches目录
+async function checkDebianPatches(workspaceFolder: vscode.WorkspaceFolder): Promise<{exists: boolean, patchesDir: string, seriesFile: string}> {
+    const debianDir = path.join(workspaceFolder.uri.fsPath, 'debian');
+    const debianPatchesDir = path.join(debianDir, 'patches');
+    const debianSeriesFile = path.join(debianPatchesDir, 'series');
+    
+    try {
+        const debianDirStats = await fsPromises.stat(debianDir);
+        if (debianDirStats.isDirectory()) {
+            outputChannel.appendLine(`Found debian directory: ${debianDir}`);
+            
+            // 检查debian/patches目录是否存在
+            try {
+                const patchesDirStats = await fsPromises.stat(debianPatchesDir);
+                if (patchesDirStats.isDirectory()) {
+                    outputChannel.appendLine(`Found debian/patches directory: ${debianPatchesDir}`);
+                    return { exists: true, patchesDir: debianPatchesDir, seriesFile: debianSeriesFile };
+                }
+            } catch (error) {
+                // debian/patches目录不存在，尝试创建
+                outputChannel.appendLine(`debian/patches directory does not exist, creating it`);
+                try {
+                    await fsPromises.mkdir(debianPatchesDir, { recursive: true });
+                    outputChannel.appendLine(`Created debian/patches directory`);
+                    return { exists: true, patchesDir: debianPatchesDir, seriesFile: debianSeriesFile };
+                } catch (mkdirError) {
+                    outputChannel.appendLine(`Error creating debian/patches directory: ${mkdirError}`);
+                }
+            }
+        }
+    } catch (error) {
+        outputChannel.appendLine(`debian directory not found, using default patches directory`);
+    }
+    
+    // 如果没有debian目录或创建失败，返回默认路径
+    const defaultPatchesDir = path.join(workspaceFolder.uri.fsPath, 'patches');
+    const defaultSeriesFile = path.join(defaultPatchesDir, 'series');
+    return { exists: false, patchesDir: defaultPatchesDir, seriesFile: defaultSeriesFile };
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -687,6 +739,14 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             outputChannel.appendLine(`Working in directory: ${workspaceFolder.uri.fsPath}`);
+
+            // 检查debian目录
+            const { exists: debianExists, patchesDir, seriesFile } = await checkDebianPatches(workspaceFolder);
+            if (debianExists) {
+                outputChannel.appendLine(`Using debian patches directory: ${patchesDir}`);
+            } else {
+                outputChannel.appendLine(`Using standard patches directory: ${patchesDir}`);
+            }
 
             // 获取git修改的文件
             const modifiedFiles = await getGitModifiedFiles(workspaceFolder);
@@ -751,10 +811,17 @@ export function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine(`Patch name: ${patchName}`);
 
             // 清理quilt状态
-            await cleanQuiltState(workspaceFolder);
+            await cleanQuiltState(workspaceFolder, patchesDir);
 
             // 初始化quilt环境
             outputChannel.appendLine('\n=== Initializing quilt ===');
+            const quiltrcContent = `QUILT_PATCHES=${path.relative(workspaceFolder.uri.fsPath, patchesDir)}`;
+            const quiltrcPath = path.join(workspaceFolder.uri.fsPath, '.quiltrc');
+            
+            // 创建.quiltrc文件以设置QUILT_PATCHES
+            await fsPromises.writeFile(quiltrcPath, quiltrcContent, 'utf8');
+            outputChannel.appendLine(`Created .quiltrc file with content: ${quiltrcContent}`);
+
             await runQuiltCommand('quilt init', workspaceFolder.uri.fsPath);
 
             // 创建新的patch
@@ -831,10 +898,10 @@ export function activate(context: vscode.ExtensionContext) {
             if (processedFileCount > 0) {
                 // 手动创建patch文件
                 outputChannel.appendLine('\n=== Creating patch file ===');
-                await createManualPatch(patchName, fileDiffs, workspaceFolder);
+                await createManualPatch(patchName, fileDiffs, patchesDir, seriesFile);
 
                 // 检查patch文件
-                const patchFile = path.join(workspaceFolder.uri.fsPath, 'patches', `${patchName}.patch`);
+                const patchFile = path.join(patchesDir, `${patchName}.patch`);
                 try {
                     const patchContent = await fsPromises.readFile(patchFile, 'utf8');
                     if (!patchContent.trim()) {
@@ -853,12 +920,11 @@ export function activate(context: vscode.ExtensionContext) {
                 outputChannel.appendLine('\n=== No files were modified, not creating patch ===');
                 // 删除空patch文件
                 try {
-                    const patchFile = path.join(workspaceFolder.uri.fsPath, 'patches', `${patchName}.patch`);
+                    const patchFile = path.join(patchesDir, `${patchName}.patch`);
                     await fsPromises.unlink(patchFile);
                     outputChannel.appendLine(`Removed empty patch file: ${patchName}.patch`);
                     
                     // 从series文件中移除
-                    const seriesFile = path.join(workspaceFolder.uri.fsPath, 'patches', 'series');
                     let seriesContent = await fsPromises.readFile(seriesFile, 'utf8');
                     seriesContent = seriesContent.replace(`${patchName}.patch\n`, '');
                     await fsPromises.writeFile(seriesFile, seriesContent, 'utf8');
